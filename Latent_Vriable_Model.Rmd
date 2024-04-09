@@ -1,0 +1,542 @@
+---
+title: "Latent Variable Models"
+author: "Masanao Yajima"
+date: "2023-01-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message=FALSE,fig.align="center",fig.width=7,fig.height=7,out.width = "60%")
+# library(devtools)
+# Install RBM
+#install_github("TimoMatzen/RBM")
+pacman::p_load(
+        AmesHousing
+      , car
+      , caret
+      , caretEnsemble
+      , corrplot
+      , data.table
+      , gbm
+      , ggplot2
+      , ggExtra
+      , GGally
+      , lubridate
+      , mvtnorm
+      # , partykit
+      # , pROC
+      # , randomForest
+      # , ranger
+      # , reshape2
+      , RColorBrewer
+      # , rpart
+      # , RWeka
+      # , plyr
+      , RBM
+      # , tibble
+      # , tidyr
+      # , tree
+      # , xgboost
+     , pheatmap
+      )
+```
+
+```{css,echo=FALSE}
+.btn {
+    border-width: 0 0px 0px 0px;
+    font-weight: normal;
+    text-transform: ;
+}
+
+.btn-default {
+    color: #2ecc71;
+    background-color: #ffffff;
+    border-color: #ffffff;
+}
+```
+
+```{r,echo=FALSE}
+# Global parameter
+show_code <- TRUE
+```
+
+# Class Workbook {.tabset .tabset-fade .tabset-pills}
+
+## In class activity
+
+### Pokemon 
+
+Pokemon is a popular game that's been around for ages.  This data set from [Kaggle](https://www.kaggle.com/datasets/abcsds/pokemon) includes 800 Pokemon, including their number, name, first and second type, and basic stats: HP, Attack, Defense, Special Attack, Special Defense, and Speed. 
+
+- (ID)#: ID for each pokemon
+- Name: Name of each pokemon
+- Type 1: Each pokemon has a type, this determines weakness/resistance to attacks
+- Type 2: Some pokemon are dual type and have 2
+- Total: sum of all stats that come after this, a general guide to how strong a pokemon is
+- HP: hit points, or health, defines how much damage a pokemon can withstand before fainting
+- Attack: the base modifier for normal attacks (eg. Scratch, Punch)
+- Defense: the base damage resistance against normal attacks
+- SP Atk: special attack, the base modifier for special attacks (e.g. fire blast, bubble beam)
+- SP Def: the base damage resistance against special attacks
+- Speed: determines which pokemon attacks first each round
+
+```{r}
+Pokemon<-fread("Pokemon.csv")
+names(Pokemon) = make.names(names(Pokemon))
+Pokemon_x = Pokemon[,c('HP', 'Attack', 'Defense','Sp..Atk', 'Sp..Def', 'Speed')]
+Pokemon_x_scaled = scale(Pokemon_x, center = FALSE)
+```
+
+EDA
+```{r}
+ggpairs(as.data.frame(Pokemon_x_scaled)) 
+```
+
+Apply latent variable method described in this work book. Do you find anything that you did not find before?
+
+```{r}
+#
+#
+```
+
+Comment of the result:
+
+~~~
+Please write your answer in full sentences.
+
+
+~~~
+
+
+I also found evolution information 
+
+```{r}
+Pokemon_evo<-fread("Pokemon_evo.csv")
+```
+
+
+```{r}
+#
+#
+```
+
+Comment of the result:
+
+~~~
+Please write your answer in full sentences.
+
+
+~~~
+
+## Additional Material
+
+
+### EM algorithm example
+
+Old Faithful Geyser Data is on waiting time between eruptions and the duration of the eruption for the Old Faithful geyser in Yellowstone National Park, Wyoming, USA.
+
+```{r}
+?faithful
+ggplot(faithful)+geom_point()+aes(x=eruptions,y=waiting)
+```
+
+You can see the two blobs. Let's use EM and fit mixture of gaussian distribution.
+
+#### EM for multivariate normal
+
+There are two steps to EM.  In the E step, we create $Q(\theta,\theta^{(t-1)})$ given the current estimate of the parameter and the data.
+```{r}
+#E step: calculates conditional probabilities for latent variables
+E.step <- function(theta,x) 
+  t(apply(cbind( theta$tau[1] * dmvnorm(x,mean=theta$mu1,sigma=theta$sigma1),  
+                 theta$tau[2] * dmvnorm(x,mean=theta$mu2,sigma=theta$sigma2) ),
+  1,function(x) x/sum(x)))
+```
+
+Then in M step we use MLE with the responsibility $R$ as the weight.
+```{r}
+#M step: calculates the parameter estimates which maximize 
+M.step <- function(R,x) 
+list( tau= apply(R,2,mean), 
+      mu1= apply(x,2,weighted.mean,R[,1]), 
+      mu2= apply(x,2,weighted.mean,R[,2]), 
+      sigma1= cov.wt(x,R[,1])$cov, 
+      sigma2= cov.wt(x,R[,2])$cov)
+```
+
+We run EM by stepping through E and M steps 
+```{r}
+x=faithful
+#initial parameter estimates (chosen to be deliberately bad)
+theta <- list( tau=c(0.5,0.5), 
+               mu1=c(2.8,75), mu2=c(3.6,58), 
+              sigma1=matrix(c(0.8,7,7,70),ncol=2), 
+              sigma2=matrix(c(0.8,7,7,70),ncol=2)  )
+
+for (iter in 2:30){ R <- E.step(theta,x); 
+                  theta <- M.step(R,x)}
+```
+
+### Probabilistic PCA
+
+PCA is useful but it lacks the ability to generalize due to the lack of probability model.
+Probabilistic PCA is a way to define PCA using a latent variable formulation. We assume $M$ independent Gaussian latent variables $\mathbf{z}$.
+$$p(\mathbf{z})\sim N(\mathbf{0},\mathbf{I})$$
+We define the conditional Likelihood on $\mathbf{x}$ given $ as
+$$p(\mathbf{x}|\mathbf{z})=N(\mathbf{x}|\mathbf{W}\mathbf{z}+\boldsymbol{\mu},\sigma^2\mathbf{I})$$
+
+When we marginal out $\mathbf{z}$ from the joint distribution $p(\mathbf{x},\mathbf{z})$ we get
+$$p(\mathbf{x})=N\left(\mathbf{x}|\boldsymbol{\mu},\mathbf{W}\mathbf{W}^T+\sigma^2\mathbf{I}\right)$$
+
+In PCA, we assume all the components are orthogonal and there is no residual error.It has been shown that when covariance of the noise becomes infinitesimally small ( $\lim \sigma^2\rightarrow0$) 
+we get the solution that is equivalent to classical PCA.
+
+With the likelihood or the conditional likelihood estimation methods such as MLE or EM algorithm can be used for the estimation.  Probabilistic PCA is implemented in `pcaMethods` package.  It has multiple variants of PCA methods implemented.  It has nice interface, but NOT all computationally faster than `prcomp`
+
+Here is an example using the pokemon Data
+```{r,fig.align="center",fig.width=14,fig.height=7,out.width = "90%"}
+library(pcaMethods)
+## Load a sample metabolite dataset with 5\% missig values (metaboliteData)e
+## Perform PPCA with 5 components
+pokePCA<- pca(Pokemon_x, method="ppca", nPcs=5)
+## Get the estimated principal axes (loadings)
+pokeloadings <- loadings(pokePCA)
+pheatmap(pokeloadings)
+## Get the estimated scores
+scores <- scores(pokePCA)
+## Now make a scores and loadings plot
+plot(pokePCA)
+slplot(pokePCA)
+
+```
+
+### Factor Analysis
+
+In psychometrics, interest is often on quantities that cannot be measured directly through some tools.  Qualities such as intelligence, maturity, generosity are human constructs that has multifaceted meanings.  It's unrealistic to assume there can be one set of experiment or questions that can measure these things.  However, by measuring multiple realization of the phenomena one could potentially arrive at the such quantity by modeling latent variables.
+To be more concrete, given a matrix of observations $\mathbf{X}_{n\times p}$ the goal is to find $m$ ($m << p$) latent factors $z_{1},\dots, z_{m}$ that are underlying the data generation process. Further assumptions are made that these latent factors are uncorrelated with one another and each have mean 0 and variance 1
+
+\[ 
+x_{1} = \mu_1 + w_{11}z_{1} + w_{12}z_{2} + \ldots + w_{1m}z_{m} + \psi_{1} \\
+x_{2} = \mu_2 + w_{21}z_{1} + w_{22}z_{2} + \ldots + w_{2m}z_{m} + \psi_{2} \\
+\vdots  \\
+x_{p} = \mu_p + w_{p1}z_{1} + w_{p2}z_{2} + \ldots + w_{pm}z_{m} + \psi_{p}
+\]
+
+
+* $x_{i}$: observed values
+* $z_{j}$: latent factors ( uncorrelated and each having mean 0 and variance 1)
+* $l_{ij}$: coefficients of common factors 	= factor loadings
+* $\psi_{i}$ : unique factors or the error term relating to one of the original variables. 
+    - $\psi_{i}$’s and $z_{j}$’s are uncorrelated
+
+Using matrix notation, we can express FA as
+$$\mathbf{x}=\mathbf{W}\mathbf{z}+\boldsymbol{\mu}+\boldsymbol{\psi},\mbox{ where } \boldsymbol{\psi}\sim N(\mathbf{0},\boldsymbol{\Sigma})$$
+The matrix of uniqueness is assumed to be a diagonal matrix.
+$$
+\boldsymbol{\Sigma}=diag(\sigma_{1}^2,\sigma_{2}^2,\dots,\sigma_{p}^2)
+$$
+The matrix $\mathbf{W}$ is referred to as the factor loading matrix.
+
+The conditional distribution $p(\mathbf{x}|\mathbf{z})$ is Gaussian
+$$p(\mathbf{x}|\mathbf{z})\sim N(\mathbf{W}\mathbf{z}+\boldsymbol{\mu},\boldsymbol{\Sigma})$$
+For FA models, we assume latent factors are independent Gaussian.
+$$p(\mathbf{z})\sim N(\mathbf{0},\mathbf{I})$$
+When we marginal out $\mathbf{z}$ from the joint distribution $p(\mathbf{x},\mathbf{z})$
+we get
+$$p(\mathbf{x}|\mathbf{z})\sim N(\boldsymbol{\mu},\mathbf{W}\mathbf{W}^T+\boldsymbol{\Sigma})$$
+When we take the factor analysis model and constrain the residual covariance to have common variance term $\sigma^2I$ we get PPCA.
+
+The matrix $\mathbf{W}$ is not unique.  Any orthogonal matrix $\mathbf{G}$ multiplied to $\mathbf{W}$ will result to the same model.
+$$(\mathbf{W}\mathbf{G})(\mathbf{W}\mathbf{G})^T+\boldsymbol{\Sigma} =\mathbf{W}\mathbf{G}\mathbf{G}^T\mathbf{W}^T+\boldsymbol{\Sigma}=\mathbf{W}\mathbf{W}^T+\boldsymbol{\Sigma}$$
+Therefore, it is customary to find a rotation that has certain properties.
+Varimax (Kaiser (1958)) rotation is one the popular rotation where each factor has a small number of large loadings and a large number of small loadings.   Oblique rotations (Promax or procrustean) relaxes the orthogonality constraint in order to gain simplicity in the interpretation.
+
+Factor analysis models are traditionally discussed in two ways.
+
+- Exploratory Factor Analysis
+    * Explore the possible underlying factor structure of a set of observed variables
+    * Does not impose a preconceived structure on the outcome. 
+
+
+- Confirmatory Factor Analysis
+  * Verifies the theoretical factor structure of a set of observed variables
+  * Test the relationship between observed variables and theoretical underlying latent constructs
+  * Variable groupings are determined ahead of time. 
+
+
+#### Example
+
+The data were obtained from 19,719 participants (rows) who provided answers to the Big Five Personality Test, constructed with items from the International Personality Item Pool. Data columns include gender, age, race, native language, country, and answers to the 50 likert rated statements (1-5;0 if missed; 1 was labeled as “strongly disagree”, 2 was labeled as “disagree”, 3 was labeled as “neither agree not disagree”, 4 was labeled as “agree” and 5 was labeled as “strongly agree”.) The original files can be obtaned at http://openpsychometrics.org/_rawdata/BIG5.zip
+http://openmv.net/info/food-texture
+```{r}
+dat = read.csv(file="https://quantdev.ssri.psu.edu/sites/qdev/files/dataBIG5.csv", header=TRUE)
+dat_num <- dat[ ,8:57]
+corrplot(cor(dat_num, use="complete.obs"), order = "hclust", tl.col='black', tl.cex=.75) 
+EFAresult1 = factanal(~ ., data=dat_num, factors = 10, rotation = "none", 
+                      na.action = na.exclude) #note the formula specification allows NA 
+EFAresult1
+loadings_fac1 = EFAresult1$loadings[,1] #loadings for first factor (1st column of Lambda)
+loadings_fac1
+
+load = EFAresult1$loadings[,1:2]
+plot(load, type="n") # set up plot 
+text(load,labels=names(dat_num),cex=.7) # add variable names
+
+EFAresult2 = factanal(~ ., data=dat_num, factors = 10, rotation = "varimax", 
+                      na.action = na.exclude)
+EFAresult2
+
+load = EFAresult2$loadings[,1:2]
+plot(load, type="n") # set up plot 
+text(load,labels=names(dat_num),cex=.7) # add variable names
+```
+
+### Independent Component Analysis (ICA)
+
+ICA is similar to FA.  The difference is that the latent variables are assumed to be independent non Gaussian distributed.
+
+```{r}
+library(imager)
+library(fastICA)
+aa=load.image("bu_terrior.jpeg")
+rowdim=200
+coldim=200
+bb=resize(aa,rowdim,coldim)
+ddf=data.frame(red=as.vector(R(bb)),green=as.vector(G(bb)),blue=as.vector(B(bb)))
+library(scatterplot3d)
+with(ddf, scatterplot3d(red,green,blue,color=rgb(red,green,blue,alpha=0.3)))
+ncenters=5
+kdf<-kmeans(ddf,centers=ncenters)
+
+pddf<-prcomp(ddf)
+
+image1<-  as.cimg(matrix(pddf$x[,3]%*%t(pddf$rotation[3,]),rowdim,coldim) ,x=rowdim,y=coldim,cc=3) 
+plot(image1)
+
+
+image1<-  as.cimg(matrix(pddf$x[,3],rowdim,coldim) ,x=rowdim,y=coldim,cc=3) 
+plot(image1)
+
+icddf<-fastICA(ddf,n.comp=3)
+
+image1<-  as.cimg(matrix(icddf$S[,1]%*%t(icddf$A[,1]),rowdim,coldim) ,x=rowdim,y=coldim,cc=3) 
+plot(image1)
+
+
+```
+
+
+### Restricted Boltzmann Machine [RBM](https://github.com/TimoMatzen/RBM)
+
+Boltzmann Machine is a two layer latent variable model represented by an undirected graph that assumes connection between all the nodes in the model.  RBMs are simplified version of BM where we assume no association between the latent variables nor between the observed variables. 
+
+RBM is a dimension reduction method and also a latent variable method.
+```{r}
+library(NeuralNetTools)
+wts_in <- c(rep(0.1,24))
+struct <- c(5, 4) #two inputs, two hidden, one output
+plotnet(wts_in, struct = struct,bias=FALSE,x_names="observed",
+        y_names="hidden",node_labs=F,circle_col=list("lightblue","white"))
+```
+
+```{r}
+fm<-fread("fashion-mnist_train_sub.csv")
+```
+
+
+```{r}
+modelRBM <- RBM(x = fm[1:300,-c(1,2)]/255, n.iter = 1000, n.hidden = 100, size.minibatch = 10)
+fm_test<- as.vector(unlist(fm[301,-c(1,2)])/255)
+ReconstructRBM(test =fm_test, model = modelRBM)
+fm_test<- as.vector(unlist(fm[302,-c(1,2)])/255)
+ReconstructRBM(test =fm_test, model = modelRBM)
+```
+
+### Self organizing map
+
+https://sites.pitt.edu/~is2470pb/Spring05/FinalProjects/Group1a/tutorial/som.html
+
+Self organizing map (SOM) are special type of neural network. They are latent variable model in a sense that they use neighborhood function to preserve the topological properties of the input space.  Each data compete for representation on the neighborhood function. 
+
+SOM mapping steps starts from initializing the weight vectors. From there a sample vector is selected randomly and the map of weight vectors is searched to find which weight best represents that sample. Each weight vector has neighboring weights that are close to it. The weight that is chosen is rewarded by being able to become more like that randomly selected sample vector. The neighbors of that weight are also rewarded by being able to become more like the chosen sample vector. From this step the number of neighbors and how much each weight can learn decreases over time. This whole process is repeated a large number of times, usually more than 1000 times.
+
+
+```{r cars}
+library(kohonen) 
+set.seed(10101)
+train.obs <- sample(nrow(iris), 50) # get the training set observations
+train.set <- scale(iris[train.obs,][,-5]) # check info about scaling data below
+test.set  <- scale(iris[-train.obs, ][-5],
+               center = attr(train.set, "scaled:center"),
+               scale  = attr(train.set, "scaled:scale"))
+som.iris <- som(train.set, grid = somgrid(5, 5, "hexagonal"))
+plot(som.iris)
+
+
+som.iris <- supersom(train.set, grid = somgrid(5, 5, "hexagonal"))
+
+som.prediction <-  predict(som.iris, newdata = test.set, trainingdata = train.set)
+
+#table(iris[-train.obs,5], som.prediction$prediction)
+```
+
+#### Wine data example from 
+
+Here is [wine example] 
+(http://www.sthda.com/english/articles/31-principal-component-methods-in-r-practical-guide/116-mfa-multiple-factor-analysis-in-r-essentials/)
+that looks at the `wine` data containing 21 rows (wines, individuals) and 31 columns (variables):
+
+The first two columns are categorical variables: label (Saumur, Bourgueil or Chinon) and soil (Reference, Env1, Env2 or Env4).
+The 29 next columns are continuous sensory variables. For each wine, the value is the mean score for all the judges.
+
+```{r}
+data(wine,package ="FactoMineR" )
+corrplot(cor(wine[,-c(1:2)]), order = "hclust", tl.col='black', tl.cex=.75) 
+
+library(FactoMineR)
+res.mfa <- MFA(wine, 
+               group = c(2, 5, 3, 10, 9, 2), 
+               type = c("n", "s", "s", "s", "s", "s"),
+               name.group = c("origin","odor","visual",
+                              "odor.after.shaking", "taste","overall"),
+               num.group.sup = c(1, 6),
+               graph = FALSE)
+library("factoextra")
+fviz_screeplot(res.mfa)
+fviz_mfa_var(res.mfa, "group")
+fviz_mfa_var(res.mfa, "quanti.var", palette = "jco", 
+             col.var.sup = "violet", repel = TRUE)
+```
+
+
+
+### [multiple-correspondence-analysis](https://en.wikipedia.org/wiki/Multiple_correspondence_analysis)
+
+Multiple-correspondence-analysis (MCA) is like PCA for categorical data. 
+For a survey with $I$ respondent on $J$ multiple choice questions with $K$ options we create the complete disjunctive table $X$, which is $I\times JK$ matrix.  More generally if we assume that the $k$-th variable have $J_k$ different levels (categories) and set $$J=\sum_{k=1}^{K} J_k.$$. The table $X$ is then a $I \times J$ matrix with all entries being $0$ or $1$. Set the sum of all entries of $X$ to be $N$ and introduce $Z=X/N$.  We want to do singular value decomposition (SVD) on this matrix but we need to scale it first.  The way to do that is by using 
+the matrices $D_r = \text{diag}(r)$ and $D_c = \text{diag}(c)$ that are based on
+
+- $r$, that contains the sums along the rows of $Z$, and 
+- $c$, that contains the sums along the columns of $Z$. 
+
+MCA is achieved by singular value decomposition of matrix $M$ where 
+$$M = D_{r}^{-1/2} (Z-r c^T ) D_{c}^{-1/2}$$
+
+The point here is that we can do PCA on categorical data as well.
+
+#### Tea example
+
+300 tea consumers have answered a survey about their consumption of tea.
+The questions were about 
+- how they consume tea, 
+- how they think of tea and 
+- descriptive questions (sex, age, socio-professional category and sport practise). 
+
+Except for the age, all the variables are categorical. For the age, the data set has two different variables: a continuous and a categorical one.
+
+From (http://factominer.free.fr/factomethods/multiple-correspondence-analysis.html)
+
+```{r}
+data(tea)
+```
+
+Demographics
+```{r}
+ggplot(tea)+geom_histogram()+aes(x=age)+facet_grid(SPC~sex)
+```
+
+Frequency
+```{r}
+tea$frequency=factor(tea$frequency,levels=c( "1 to 2/week", "3 to 6/week" , "1/day"  ,"+2/day"))
+ggplot(tea)+geom_bar()+aes(x=frequency)
+```
+
+The type of tea
+```{r}
+ggplot(tea)+geom_bar()+aes(x=Tea)
+```
+
+multiple-correspondence-analysis
+
+```{r}
+res.mca = MCA(tea, quanti.sup=19, quali.sup=c(20:36))
+plot.MCA(res.mca, invisible=c("var","quali.sup"), cex=0.7)
+plot.MCA(res.mca, invisible=c("ind","quali.sup"), cex=0.7)
+plot.MCA(res.mca, invisible=c("ind"))
+plot.MCA(res.mca, invisible=c("ind", "var"))
+corrplot(res.mca$var$contrib,is.cor=FALSE)
+```
+
+
+####  t-distributed stochastic neighbor embedding (t-SNE) 
+
+First is [t-SNE](https://lvdmaaten.github.io/tsne/) by L.J.P. van der Maaten and G.E. Hinton (2008). The algorithm projects the high-dimensional data points into low dimension (2D) by inducing the projected data to have a similar distribution as the original data points by minimizing KL divergence.
+
+```{r,eval=TRUE}
+library(Rtsne)
+# perform dimensionality reduction from 64D to 2D
+tsne_out <- Rtsne(as.matrix(fm[1:200,-1]), check_duplicates = FALSE, 
+              pca = FALSE, perplexity=20, theta=0.5, dims=2)
+
+cols <- rainbow(10)
+
+tsne_plot <- data.frame(x = tsne_out$Y[,1],
+                        y = tsne_out$Y[,2],label=factor(unlist(fm[1:200,1])))
+ 
+# Plotting the plot using ggplot() function
+ggplot2::ggplot(tsne_plot)+ geom_point(aes(x=x,y=y,color=label)) 
+
+#plot(tsne_out$Y[,1],tsne_out$Y[,2],col=cols[unlist(fm[1:200,1]) +1] )
+#text(tsne$Y[,1],tsne$Y[,2], labels=fm[1:200,1], col=cols[unlist(fm[1:200,1]) +1])
+```
+
+#### Uniform Manifold Approximation (UMAP)
+
+UMAP is another dimension reduction described by McInnes and Healy (2018) in <arXiv:1802.03426>.
+
+```{r}
+library(umap)
+custom.config <- umap.defaults
+config=custom.config
+custom.config$n_epochs <-500
+umapresult<-umap(fm[1:200,-1],config=custom.config)
+```
+
+```{r}
+plot_umap<-function(x, labels,
+         main="A UMAP visualization",
+         colors=rainbow(10),
+         pad=0.1, cex=0.6, pch=19, add=FALSE, legend.suffix="",
+         cex.main=1, cex.legend=0.85) {
+
+  layout <- x
+  if (is(x, "umap")) {
+    layout <- x$layout
+  } 
+  
+  xylim <- range(layout)
+  xylim <- xylim + ((xylim[2]-xylim[1])*pad)*c(-0.5, 0.5)
+  if (!add) {
+    par(mar=c(0.2,0.7,1.2,0.7), ps=10)
+    plot(xylim, xylim, type="n", axes=F, frame=F)
+    rect(xylim[1], xylim[1], xylim[2], xylim[2], border="#aaaaaa", lwd=0.25)  
+  }
+  points(layout[,1], layout[,2], col=colors[as.integer(labels)],
+         cex=cex, pch=pch)
+  mtext(side=3, main, cex=cex.main)
+
+  labels.u <- unique(labels)
+  legend.pos <- "topleft"
+  legend.text <- as.character(labels.u)
+  if (add) {
+    legend.pos <- "bottomleft"
+    legend.text <- paste(as.character(labels.u), legend.suffix)
+  }
+
+  legend(legend.pos, legend=legend.text, inset=0.03,
+         col=colors[as.integer(labels.u)],
+         bty="n", pch=pch, cex=cex.legend)
+}
+plot_umap(umapresult,unlist(fm[1:200,-1]))
+
+```
